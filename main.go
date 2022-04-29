@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -117,8 +116,6 @@ func main() {
 	if err := json.Unmarshal(b, &yesterdayBeans); err != nil {
 		log.Fatal("error unmarshalling data", err)
 	}
-
-	fmt.Println("Yesterday:", yesterdayBeans)
 	
 	// compare yesterday's waitlist with today's
 	available := []string{}
@@ -128,8 +125,6 @@ func main() {
 			available = append(available, name)
 		}
 	}
-
-	fmt.Println(available)
 
 	// convert to json for upload
 	js, err := json.MarshalIndent(todayBeans, "", "\t")
@@ -152,21 +147,30 @@ func main() {
 	}
 	
 	// email results
-	buffer := &bytes.Buffer{}
-	gob.NewEncoder(buffer).Encode(available)
-	message := buffer.Bytes()
-	email(message)
-	
+	if len(available) == 0 {
+		message := []byte(
+			"Subject: No new beans\r\n" + "\r\n" + "No beans have been removed from the waitlist\r\n",
+		)
+		email(message)
+	} else {
+		availBeans := s.Join(available, ", ")
+		byteBeans := []byte(availBeans)
+		intro := []byte(
+			"Subject: Beans are available!\r\n" + "\r\n")
+		message := append(intro, byteBeans...)
+		email(message)
+	}	
 }
 
 func email(message []byte) {
-	err := godotenv.Load(".env")
+    err := godotenv.Load(".env")
 	if err != nil {
-		log.Fatal("Error loading .env", err)
+		log.Fatalf("Error loading .env file")
 	}
 
 	from := os.Getenv("FROM")
 	password := os.Getenv("PASSWORD")
+
 	to := []string{
 		os.Getenv("TO"),
 	}
@@ -175,14 +179,16 @@ func email(message []byte) {
 
 	body := message
 
+	fmt.Println("here now., ", body)
+
 	auth := smtp.PlainAuth("", from, password, smtpHost)
 
 	addr := s.Join([]string{smtpHost, smtpPort}, ":")
 
-	emailErr := smtp.SendMail(addr, auth, from,to, body)
+	emailErr := smtp.SendMail(addr, auth, from, to, body)
 	if emailErr != nil {
-		log.Println("unable to send email", emailErr)
+		log.Println("email failed to send", emailErr)
 		return
 	}
-	log.Printf("Email sent to %s", to[0])
+	log.Printf("Email successfully sent to %s", to[0])
 }
