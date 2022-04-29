@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/smtp"
 	"os"
+	"strconv"
 	s "strings"
 	"time"
 
@@ -24,6 +25,18 @@ import (
 type Beans map[string]bool
 
 const beanUrl = "https://www.ranchogordo.com/collections/out-of-stock-beans"
+
+type Weekday int
+
+const (
+	Sunday Weekday = iota
+	Monday
+	Tuesday
+	Wednesday
+	Thursday
+	Friday
+	Saturday
+)
 
 func main() {
 	uAgent := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.88 Safari/537.36"
@@ -54,7 +67,7 @@ func main() {
 		log.Fatal("error parsing Body", err)
 	}
 
-	today := Beans{}
+	todayBeans := Beans{}
 
 	doc.Find("div.sold-out").Each(func(i int, s *goquery.Selection) {
 		name := s.Find("p.grid-link__title").First().Text()
@@ -62,8 +75,20 @@ func main() {
 			message := []byte("issue with scrape -- please check selectors")
 			email(message)
 		}
-		today[name] = true
+		todayBeans[name] = true
 	})
+
+	// determine key names
+	t := time.Now()
+	today := int(t.Weekday())
+	var yesterday int
+	if today == 0 {
+		yesterday = 6
+	} else {
+		yesterday = int(t.Weekday() - 1)
+	}
+	yesterdayKey := s.Join([]string{"waitlistedBeans", strconv.Itoa(yesterday)}, "")
+	todayKey := s.Join([]string{"waitlistedBeans", strconv.Itoa(today)}, "")
 	
 	// pull yesterday's data from s3
 	sess := session.Must(session.NewSession(&aws.Config{
@@ -74,7 +99,7 @@ func main() {
 
 	requestInput := &s3.GetObjectInput{
 		Bucket: aws.String("beanwaitlist"),
-		Key:    aws.String("waitlistedBeans"),
+		Key:    aws.String(yesterdayKey),
 	}
 
 	result, err := s3Client.GetObject(requestInput)
@@ -88,18 +113,18 @@ func main() {
 		log.Fatal("error reading body\n", err)
 	}
 
-	yesterday := Beans{}
-	if err := json.Unmarshal(b, &yesterday); err != nil {
+	yesterdayBeans := Beans{}
+	if err := json.Unmarshal(b, &yesterdayBeans); err != nil {
 		log.Fatal("error unmarshalling data", err)
 	}
 
-	fmt.Println("Yesterday:", yesterday)
+	fmt.Println("Yesterday:", yesterdayBeans)
 	
-	// compare (currently dummy data)
+	// compare yesterday's waitlist with today's
 	available := []string{}
 
-	for name := range yesterday {
-		if _, ok := today[name]; !ok {
+	for name := range yesterdayBeans {
+		if _, ok := todayBeans[name]; !ok {
 			available = append(available, name)
 		}
 	}
@@ -107,29 +132,29 @@ func main() {
 	fmt.Println(available)
 
 	// convert to json for upload
-	js, err := json.MarshalIndent(today, "", "\t")
+	js, err := json.MarshalIndent(todayBeans, "", "\t")
 	if err != nil {
 		log.Fatal("error with marshalling data", err)
 	}
 
-	// figure out system to use for key names
+	// upload file to s3
 	uploader := s3manager.NewUploader(sess)
 	_, ierr := uploader.Upload(&s3manager.UploadInput{
 		Bucket: aws.String("beanwaitlist"),
-		Key: aws.String("waitlistedBeansThursday"),
+		Key: aws.String(todayKey),
 		Body: bytes.NewReader(js),
 	}) 
 
 	if ierr != nil {
-		log.Println("failed to upload file\n", ierr.Error())
+		log.Println("failed to upload today's scraping data\n", ierr)
 	} else {
-		log.Println("successfully uploaded")
+		log.Println("today's scraping data successfully uploaded")
 	}
 	
 	// email results
-	buf := &bytes.Buffer{}
-	gob.NewEncoder(buf).Encode(available)
-	message := buf.Bytes()
+	buffer := &bytes.Buffer{}
+	gob.NewEncoder(buffer).Encode(available)
+	message := buffer.Bytes()
 	email(message)
 	
 }
