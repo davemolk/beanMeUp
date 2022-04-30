@@ -39,29 +39,12 @@ const (
 )
 
 func main() {
-	
 	res := makeRequest()
 	
 	defer res.Body.Close()
 
-	
-
 	// scrape phase
-	doc, err := goquery.NewDocumentFromReader(res.Body)
-	if err != nil {
-		log.Fatal("error parsing Body", err)
-	}
-
-	todayBeans := Beans{}
-
-	doc.Find("div.sold-out").Each(func(i int, s *goquery.Selection) {
-		name := s.Find("p.grid-link__title").First().Text()
-		if name == "" {
-			message := []byte("issue with scrape -- please check selectors")
-			email(message)
-		}
-		todayBeans[name] = true
-	})
+	todayBeans := scraper(res)
 
 	// determine key names
 	yesterdayKey, todayKey, err := key()
@@ -165,6 +148,26 @@ func makeRequest() *http.Response {
 	}
 
 	return res
+}
+
+func scraper(res *http.Response) Beans {
+	doc, err := goquery.NewDocumentFromReader(res.Body)
+	if err != nil {
+		log.Fatal("error parsing Body", err)
+	}
+
+	todayBeans := Beans{}
+
+	doc.Find("div.sold-out").Each(func(i int, s *goquery.Selection) {
+		name := s.Find("p.grid-link__title").First().Text()
+		if name == "" {
+			message := []byte("issue with scrape -- please check selectors")
+			email(message)
+		}
+		todayBeans[name] = true
+	})
+
+	return todayBeans
 }
 
 func key() (string, string, error) {
