@@ -3,8 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
-	"io/ioutil"
+	"errors"
+	"io"
 	"log"
 	"net/http"
 	"net/smtp"
@@ -78,16 +78,10 @@ func main() {
 	})
 
 	// determine key names
-	t := time.Now()
-	today := int(t.Weekday())
-	var yesterday int
-	if today == 0 {
-		yesterday = 6
-	} else {
-		yesterday = int(t.Weekday() - 1)
+	yesterdayKey, todayKey, err := key()
+	if err != nil {
+		log.Fatal("problem with key creation")
 	}
-	yesterdayKey := s.Join([]string{"waitlistedBeans", strconv.Itoa(yesterday)}, "")
-	todayKey := s.Join([]string{"waitlistedBeans", strconv.Itoa(today)}, "")
 	
 	// pull yesterday's data from s3
 	sess := session.Must(session.NewSession(&aws.Config{
@@ -107,7 +101,7 @@ func main() {
 	}
 
 	defer result.Body.Close()
-	b, err := ioutil.ReadAll(result.Body)
+	b, err := io.ReadAll(result.Body)
 	if err != nil {
 		log.Fatal("error reading body\n", err)
 	}
@@ -116,6 +110,8 @@ func main() {
 	if err := json.Unmarshal(b, &yesterdayBeans); err != nil {
 		log.Fatal("error unmarshalling data", err)
 	}
+	
+	log.Println("Yesterday:", yesterdayBeans)
 	
 	// compare yesterday's waitlist with today's
 	available := []string{}
@@ -162,6 +158,23 @@ func main() {
 	}	
 }
 
+func key() (string, string, error) {
+	t := time.Now()
+	today := int(t.Weekday())
+	var yesterday int
+	if today == 0 {
+		yesterday = 6
+	} else {
+		yesterday = int(t.Weekday() - 1)
+	}
+	yesterdayKey := s.Join([]string{"waitlistedBeans", strconv.Itoa(yesterday)}, "")
+	todayKey := s.Join([]string{"waitlistedBeans", strconv.Itoa(today)}, "")
+	if yesterdayKey == "" || todayKey == "" {
+		return yesterdayKey, todayKey, errors.New("problem with key creation")
+	}
+	return yesterdayKey, todayKey, nil
+}
+
 func email(message []byte) {
     err := godotenv.Load(".env")
 	if err != nil {
@@ -178,8 +191,6 @@ func email(message []byte) {
 	smtpPort := os.Getenv("SMTP_PORT")
 
 	body := message
-
-	fmt.Println("here now., ", body)
 
 	auth := smtp.PlainAuth("", from, password, smtpHost)
 
