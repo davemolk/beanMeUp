@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/joho/godotenv"
+	twilio "github.com/twilio/twilio-go"
+	openapi "github.com/twilio/twilio-go/rest/api/v2010"
 )
 
 type Beans map[string]bool
@@ -119,12 +122,8 @@ func main() {
 		email(message)
 	} else {
 		availBeans := s.Join(available, ", ")
-		byteBeans := []byte(availBeans)
-		intro := []byte(
-			"Subject: Beans are available!\r\n" + "\r\n")
-		message := append(intro, byteBeans...)
-		email(message)
-	}	
+		text(availBeans)
+	}
 }
 
 func makeRequest() *http.Response {
@@ -168,6 +167,22 @@ func scraper(res *http.Response) Beans {
 	})
 
 	return todayBeans
+}
+
+func text(beans string) {
+	availBeans := beans
+	client := twilio.NewRestClient()
+	params := &openapi.CreateMessageParams{}
+    params.SetTo(os.Getenv("TO_PHONE_NUMBER"))
+    params.SetFrom(os.Getenv("TWILIO_PHONE_NUMBER"))
+    params.SetBody(fmt.Sprintf("The following beans are now available: %s", availBeans))
+
+	_, err := client.ApiV2010.CreateMessage(params)
+    if err != nil {
+        log.Println(err.Error())
+    } else {
+        log.Println("SMS sent successfully!")
+    }
 }
 
 func key() (string, string, error) {
