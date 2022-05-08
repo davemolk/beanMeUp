@@ -113,6 +113,9 @@ func main() {
 	} else {
 		log.Println("today's scraping data successfully uploaded")
 	}
+
+	// check URLS
+	results := checkURL(available)
 	
 	// email results
 	if len(available) == 0 {
@@ -175,7 +178,10 @@ func text(beans string) {
 	params := &openapi.CreateMessageParams{}
     params.SetTo(os.Getenv("TO_PHONE_NUMBER"))
     params.SetFrom(os.Getenv("TWILIO_PHONE_NUMBER"))
-    params.SetBody(fmt.Sprintf("The following beans are now available: %s", availBeans))
+    params.SetBody(fmt.Sprintf(`The following beans are now available: 
+	%s
+	Find them at: https://www.ranchogordo.com/
+	`, availBeans))
 
 	_, err := client.ApiV2010.CreateMessage(params)
     if err != nil {
@@ -183,6 +189,16 @@ func text(beans string) {
     } else {
         log.Println("SMS sent successfully!")
     }
+}
+
+func checkURL(available []string) []string {
+	base1 := "https://www.ranchogordo.com/collections/heirloom-beans/products/"
+	base2 := "https://www.ranchogordo.com/collections/the-rancho-gordo-xoxoc-project/products/"
+	for _, v := range available {
+		// keep a list of what is in which category? more efficent than doing two calls? or, we're opnly
+		// talking about 1-2 bean possibilities, so could even do a goroutine situation (if len(available > 1))
+		
+	}
 }
 
 func key() (string, string, error) {
