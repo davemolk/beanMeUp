@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/smtp"
 	"os"
+	"regexp"
 	"strconv"
 	s "strings"
 	"time"
@@ -42,7 +43,7 @@ const (
 )
 
 func main() {
-	res := makeRequest()
+	res := mainRequest()
 	
 	defer res.Body.Close()
 
@@ -114,9 +115,6 @@ func main() {
 		log.Println("today's scraping data successfully uploaded")
 	}
 
-	// check URLS
-	results := checkURL(available)
-	
 	// email results
 	if len(available) == 0 {
 		message := []byte(
@@ -124,12 +122,14 @@ func main() {
 		)
 		email(message)
 	} else {
-		availBeans := s.Join(available, ", ")
+		textUrls := checkURL(available)
+		beansAndUrls := append(available, textUrls...)
+		availBeans := s.Join(beansAndUrls, ", ")
 		text(availBeans)
 	}
 }
 
-func makeRequest() *http.Response {
+func mainRequest() *http.Response {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
@@ -180,12 +180,11 @@ func text(beans string) {
     params.SetFrom(os.Getenv("TWILIO_PHONE_NUMBER"))
     params.SetBody(fmt.Sprintf(`The following beans are now available: 
 	%s
-	Find them at: https://www.ranchogordo.com/
 	`, availBeans))
 
 	_, err := client.ApiV2010.CreateMessage(params)
     if err != nil {
-        log.Println(err.Error())
+        log.Println(err)
     } else {
         log.Println("SMS sent successfully!")
     }
@@ -194,12 +193,42 @@ func text(beans string) {
 func checkURL(available []string) []string {
 	base1 := "https://www.ranchogordo.com/collections/heirloom-beans/products/"
 	base2 := "https://www.ranchogordo.com/collections/the-rancho-gordo-xoxoc-project/products/"
+	textUrls := []string{}
 	for _, v := range available {
 		// keep a list of what is in which category? more efficent than doing two calls? or, we're opnly
 		// talking about 1-2 bean possibilities, so could even do a goroutine situation (if len(available > 1))
-		
+		body := quickRequest(base1, v)
+
+		wrongURL := regexp.MustCompile("404-not-found").MatchString(body)
+
+		if wrongURL {
+			body := quickRequest(base2, v)
+			wrong2 := regexp.MustCompile("404-not-found").MatchString(body)
+			if wrong2 {
+				textUrls = append(textUrls, "https://www.ranchogordo.com/")
+			} else {
+				textUrls = append(textUrls, base2 + v)
+			}
+		} else {
+			textUrls = append(textUrls, base1 + v)
+		}
 	}
+	return textUrls
 }
+
+func quickRequest(url, name string) string {
+	res, err := http.Get(url + name)
+		if err != nil {
+			log.Println("checkURL failing", err)
+		}
+		defer res.Body.Close()
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			log.Println("error with checkURL ReadAll", err)
+		}
+		return string(body)
+}
+
 
 func key() (string, string, error) {
 	t := time.Now()
