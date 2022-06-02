@@ -43,6 +43,11 @@ const (
 )
 
 func main() {
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Fatalf("Error loading .env file")
+	}
+
 	res := mainRequest()
 
 	defer res.Body.Close()
@@ -117,15 +122,13 @@ func main() {
 
 	// email results
 	if len(available) == 0 {
-		message := []byte(
-			"Subject: No new beans\r\n" + "\r\n" + "No beans have been removed from the waitlist\r\n",
-		)
-		email(message)
+		message := "Subject: No new beans\r\n" + "\r\n" + "No beans have been removed from the waitlist\r\n"
+		text(message, false)
 	} else {
 		textUrls := checkURL(available)
 		beansAndUrls := append(available, textUrls...)
 		availBeans := s.Join(beansAndUrls, ", ")
-		text(availBeans)
+		text(availBeans, true)
 	}
 }
 
@@ -172,15 +175,19 @@ func scraper(res *http.Response) Beans {
 	return todayBeans
 }
 
-func text(beans string) {
-	availBeans := beans
+func text(beans string, available bool) {
 	client := twilio.NewRestClient()
 	params := &openapi.CreateMessageParams{}
 	params.SetTo(os.Getenv("TO_PHONE_NUMBER"))
 	params.SetFrom(os.Getenv("TWILIO_PHONE_NUMBER"))
-	params.SetBody(fmt.Sprintf(`The following beans are now available: 
-	%s
-	`, availBeans))
+	if available {
+		availBeans := beans
+		params.SetBody(fmt.Sprintf(`The following beans are now available: 
+		%s
+		`, availBeans))
+	} else {
+		params.SetBody(beans)
+	}
 
 	_, err := client.ApiV2010.CreateMessage(params)
 	if err != nil {
@@ -236,11 +243,6 @@ func key() (string, string, error) {
 }
 
 func email(message []byte) {
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Fatalf("Error loading .env file")
-	}
-
 	from := os.Getenv("FROM")
 	password := os.Getenv("PASSWORD")
 

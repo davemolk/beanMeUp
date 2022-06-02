@@ -1,12 +1,12 @@
 module github.com/davemolk/beanCounter
 
-go 1.18
+go 1.17
 
 require (
 	github.com/PuerkitoBio/goquery v1.8.0
 	github.com/aws/aws-sdk-go v1.44.2
 	github.com/joho/godotenv v1.4.0
-	github.com/twilio/twilio-go v0.25.0
+	github.com/twilio/twilio-go v0.24.1
 )
 
 require (
