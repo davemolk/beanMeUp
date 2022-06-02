@@ -27,9 +27,6 @@ import (
 
 type Beans map[string]bool
 
-const beanUrl = "https://www.ranchogordo.com/collections/out-of-stock-beans"
-const uAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.88 Safari/537.36"
-
 type Weekday int
 
 const (
@@ -48,18 +45,24 @@ func main() {
 		log.Fatalf("Error loading .env file")
 	}
 
-	res := mainRequest()
+	beanUrl := "https://www.ranchogordo.com/collections/out-of-stock-beans"
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	res, err := mainRequest(beanUrl, client)
+	assertErrorToNilf("unable to reach website: %v", err)
 
 	defer res.Body.Close()
 
 	// scrape phase
-	todayBeans := scraper(res)
+	todayBeans, err := scraper(res)
+	assertErrorToNilf("scrape unsuccessful: %v", err)
 
 	// determine key names
 	yesterdayKey, todayKey, err := key()
-	if err != nil {
-		log.Fatal("problem with key creation")
-	}
+	assertErrorToNilf("key creation unsuccessful: %v", err)
 
 	// pull yesterday's data from s3
 	sess := session.Must(session.NewSession(&aws.Config{
@@ -74,20 +77,15 @@ func main() {
 	}
 
 	result, err := s3Client.GetObject(requestInput)
-	if err != nil {
-		log.Fatal("unable to get s3 data\n", err)
-	}
+	assertErrorToNilf("unable to get S3 data: %v", err)
 
 	defer result.Body.Close()
 	b, err := io.ReadAll(result.Body)
-	if err != nil {
-		log.Fatal("error reading body\n", err)
-	}
+	assertErrorToNilf("unable to read S3 data: %v", err)
 
 	yesterdayBeans := Beans{}
-	if err := json.Unmarshal(b, &yesterdayBeans); err != nil {
-		log.Fatal("error unmarshalling data", err)
-	}
+	err = json.Unmarshal(b, &yesterdayBeans)
+	assertErrorToNilf("unable to unmarshal data: %v", err)
 
 	log.Println("Yesterday:", yesterdayBeans)
 
@@ -102,20 +100,18 @@ func main() {
 
 	// convert to json for upload
 	js, err := json.MarshalIndent(todayBeans, "", "\t")
-	if err != nil {
-		log.Fatal("error with marshalling data", err)
-	}
+	assertErrorToNilf("unable to marshal data: %v", err)
 
 	// upload file to s3
 	uploader := s3manager.NewUploader(sess)
-	_, ierr := uploader.Upload(&s3manager.UploadInput{
+	_, err = uploader.Upload(&s3manager.UploadInput{
 		Bucket: aws.String("beanwaitlist"),
 		Key:    aws.String(todayKey),
 		Body:   bytes.NewReader(js),
 	})
 
-	if ierr != nil {
-		log.Println("failed to upload today's scraping data\n", ierr)
+	if err != nil {
+		log.Printf("failed to upload today's scraping data: %v", err)
 	} else {
 		log.Println("today's scraping data successfully uploaded")
 	}
@@ -123,42 +119,39 @@ func main() {
 	// email results
 	if len(available) == 0 {
 		message := "Subject: No new beans\r\n" + "\r\n" + "No beans have been removed from the waitlist\r\n"
-		text(message, false)
+		err := text(message, false)
+		assertErrorToNilf("text attempt unsuccessful: %v", err)
 	} else {
 		textUrls := checkURL(available)
 		beansAndUrls := append(available, textUrls...)
 		availBeans := s.Join(beansAndUrls, ", ")
-		text(availBeans, true)
+		err := text(availBeans, true)
+		assertErrorToNilf("text attempt unsuccessful: %v", err)
 	}
 }
 
-func mainRequest() *http.Response {
-	client := &http.Client{
-		Timeout: 10 * time.Second,
+func mainRequest(url string, client *http.Client) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create request: %v", err)
 	}
 
-	req, err := http.NewRequest("GET", beanUrl, nil)
-	if err != nil {
-		log.Fatal("unable to set request", err)
-	}
+	uAgent := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.88 Safari/537.36"
+
 	req.Header.Set("User-Agent", uAgent)
 
 	res, err := client.Do(req)
 	if err != nil {
-		log.Fatal("request failed", err)
+		return nil, fmt.Errorf("request failed: %v", err)
 	}
 
-	if res.StatusCode != 200 {
-		log.Fatalf("status code error: %d %s", res.StatusCode, res.Status)
-	}
-
-	return res
+	return res, nil
 }
 
-func scraper(res *http.Response) Beans {
+func scraper(res *http.Response) (Beans, error) {
 	doc, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		log.Fatal("error parsing Body", err)
+		return nil, fmt.Errorf("error parsing website: %v", err)
 	}
 
 	todayBeans := Beans{}
@@ -172,10 +165,10 @@ func scraper(res *http.Response) Beans {
 		todayBeans[name] = true
 	})
 
-	return todayBeans
+	return todayBeans, nil
 }
 
-func text(beans string, available bool) {
+func text(beans string, available bool) error {
 	client := twilio.NewRestClient()
 	params := &openapi.CreateMessageParams{}
 	params.SetTo(os.Getenv("TO_PHONE_NUMBER"))
@@ -191,17 +184,20 @@ func text(beans string, available bool) {
 
 	_, err := client.ApiV2010.CreateMessage(params)
 	if err != nil {
-		log.Println(err)
-	} else {
-		log.Println("SMS sent successfully!")
+		return fmt.Errorf("unable to send text: %v", err)
 	}
+	log.Println("SMS sent successfully!")
+	return nil
 }
 
 func checkURL(available []string) []string {
 	base := "https://www.ranchogordo.com/products/"
 	textUrls := []string{}
 	for _, v := range available {
-		body := quickRequest(base, v)
+		body, err := quickRequest(base, v)
+		if err != nil {
+			log.Printf("unable to check URL for %q", v)
+		}
 		wrongURL := regexp.MustCompile("404-not-found").MatchString(body)
 		if wrongURL {
 			textUrls = append(textUrls, "https://www.ranchogordo.com/")
@@ -212,17 +208,18 @@ func checkURL(available []string) []string {
 	return textUrls
 }
 
-func quickRequest(url, name string) string {
+func quickRequest(url, name string) (string, error) {
 	res, err := http.Get(url + name)
 	if err != nil {
-		log.Println("checkURL failing", err)
+		return "", fmt.Errorf("checkURL failing: %v", err)
 	}
+
 	defer res.Body.Close()
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		log.Println("error with checkURL ReadAll", err)
+		return "", fmt.Errorf("error with checkURL ReadAll: %v", err)
 	}
-	return string(body)
+	return string(body), nil
 }
 
 func key() (string, string, error) {
@@ -264,4 +261,10 @@ func email(message []byte) {
 		return
 	}
 	log.Printf("Email successfully sent to %s", to[0])
+}
+
+func assertErrorToNilf(msg string, err error) {
+	if err != nil {
+		log.Fatalf(msg, err)
+	}
 }
