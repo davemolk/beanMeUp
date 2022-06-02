@@ -44,7 +44,7 @@ const (
 
 func main() {
 	res := mainRequest()
-	
+
 	defer res.Body.Close()
 
 	// scrape phase
@@ -55,7 +55,7 @@ func main() {
 	if err != nil {
 		log.Fatal("problem with key creation")
 	}
-	
+
 	// pull yesterday's data from s3
 	sess := session.Must(session.NewSession(&aws.Config{
 		Region: aws.String("us-west-1"),
@@ -83,9 +83,9 @@ func main() {
 	if err := json.Unmarshal(b, &yesterdayBeans); err != nil {
 		log.Fatal("error unmarshalling data", err)
 	}
-	
+
 	log.Println("Yesterday:", yesterdayBeans)
-	
+
 	// compare yesterday's waitlist with today's
 	available := []string{}
 
@@ -105,9 +105,9 @@ func main() {
 	uploader := s3manager.NewUploader(sess)
 	_, ierr := uploader.Upload(&s3manager.UploadInput{
 		Bucket: aws.String("beanwaitlist"),
-		Key: aws.String(todayKey),
-		Body: bytes.NewReader(js),
-	}) 
+		Key:    aws.String(todayKey),
+		Body:   bytes.NewReader(js),
+	})
 
 	if ierr != nil {
 		log.Println("failed to upload today's scraping data\n", ierr)
@@ -176,41 +176,30 @@ func text(beans string) {
 	availBeans := beans
 	client := twilio.NewRestClient()
 	params := &openapi.CreateMessageParams{}
-    params.SetTo(os.Getenv("TO_PHONE_NUMBER"))
-    params.SetFrom(os.Getenv("TWILIO_PHONE_NUMBER"))
-    params.SetBody(fmt.Sprintf(`The following beans are now available: 
+	params.SetTo(os.Getenv("TO_PHONE_NUMBER"))
+	params.SetFrom(os.Getenv("TWILIO_PHONE_NUMBER"))
+	params.SetBody(fmt.Sprintf(`The following beans are now available: 
 	%s
 	`, availBeans))
 
 	_, err := client.ApiV2010.CreateMessage(params)
-    if err != nil {
-        log.Println(err)
-    } else {
-        log.Println("SMS sent successfully!")
-    }
+	if err != nil {
+		log.Println(err)
+	} else {
+		log.Println("SMS sent successfully!")
+	}
 }
 
 func checkURL(available []string) []string {
-	base1 := "https://www.ranchogordo.com/collections/heirloom-beans/products/"
-	base2 := "https://www.ranchogordo.com/collections/the-rancho-gordo-xoxoc-project/products/"
+	base := "https://www.ranchogordo.com/products/"
 	textUrls := []string{}
 	for _, v := range available {
-		// keep a list of what is in which category? more efficent than doing two calls? or, we're opnly
-		// talking about 1-2 bean possibilities, so could even do a goroutine situation (if len(available > 1))
-		body := quickRequest(base1, v)
-
+		body := quickRequest(base, v)
 		wrongURL := regexp.MustCompile("404-not-found").MatchString(body)
-
 		if wrongURL {
-			body := quickRequest(base2, v)
-			wrong2 := regexp.MustCompile("404-not-found").MatchString(body)
-			if wrong2 {
-				textUrls = append(textUrls, "https://www.ranchogordo.com/")
-			} else {
-				textUrls = append(textUrls, base2 + v)
-			}
+			textUrls = append(textUrls, "https://www.ranchogordo.com/")
 		} else {
-			textUrls = append(textUrls, base1 + v)
+			textUrls = append(textUrls, base+v)
 		}
 	}
 	return textUrls
@@ -218,17 +207,16 @@ func checkURL(available []string) []string {
 
 func quickRequest(url, name string) string {
 	res, err := http.Get(url + name)
-		if err != nil {
-			log.Println("checkURL failing", err)
-		}
-		defer res.Body.Close()
-		body, err := io.ReadAll(res.Body)
-		if err != nil {
-			log.Println("error with checkURL ReadAll", err)
-		}
-		return string(body)
+	if err != nil {
+		log.Println("checkURL failing", err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		log.Println("error with checkURL ReadAll", err)
+	}
+	return string(body)
 }
-
 
 func key() (string, string, error) {
 	t := time.Now()
@@ -248,7 +236,7 @@ func key() (string, string, error) {
 }
 
 func email(message []byte) {
-    err := godotenv.Load(".env")
+	err := godotenv.Load(".env")
 	if err != nil {
 		log.Fatalf("Error loading .env file")
 	}
