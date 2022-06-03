@@ -8,11 +8,9 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/smtp"
 	"os"
-	"regexp"
 	"strconv"
-	s "strings"
+	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -41,9 +39,7 @@ const (
 
 func main() {
 	err := godotenv.Load(".env")
-	if err != nil {
-		log.Fatalf("Error loading .env file")
-	}
+	assertErrorToNilf("unable to load env: %v", err)
 
 	beanUrl := "https://www.ranchogordo.com/collections/out-of-stock-beans"
 
@@ -56,15 +52,13 @@ func main() {
 
 	defer res.Body.Close()
 
-	// scrape phase
 	todayBeans, err := scraper(res)
 	assertErrorToNilf("scrape unsuccessful: %v", err)
 
-	// determine key names
 	yesterdayKey, todayKey, err := key()
 	assertErrorToNilf("key creation unsuccessful: %v", err)
 
-	// pull yesterday's data from s3
+	// get yesterday's data from S3
 	sess := session.Must(session.NewSession(&aws.Config{
 		Region: aws.String("us-west-1"),
 	}))
@@ -80,6 +74,7 @@ func main() {
 	assertErrorToNilf("unable to get S3 data: %v", err)
 
 	defer result.Body.Close()
+
 	b, err := io.ReadAll(result.Body)
 	assertErrorToNilf("unable to read S3 data: %v", err)
 
@@ -87,7 +82,7 @@ func main() {
 	err = json.Unmarshal(b, &yesterdayBeans)
 	assertErrorToNilf("unable to unmarshal data: %v", err)
 
-	log.Println("Yesterday:", yesterdayBeans)
+	log.Println("yesterday's beans:", yesterdayBeans)
 
 	// compare yesterday's waitlist with today's
 	available := []string{}
@@ -109,22 +104,18 @@ func main() {
 		Key:    aws.String(todayKey),
 		Body:   bytes.NewReader(js),
 	})
+	assertErrorToNilf("failed to upload today's scraping data: %v", err)
+	log.Println("today's scraping data successfully uploaded")
 
-	if err != nil {
-		log.Printf("failed to upload today's scraping data: %v", err)
-	} else {
-		log.Println("today's scraping data successfully uploaded")
-	}
-
-	// email results
+	// text results
 	if len(available) == 0 {
-		message := "Subject: No new beans\r\n" + "\r\n" + "No beans have been removed from the waitlist\r\n"
+		message := "No beans have been removed from the waitlist"
 		err := text(message, false)
 		assertErrorToNilf("text attempt unsuccessful: %v", err)
 	} else {
 		textUrls := checkURL(available)
 		beansAndUrls := append(available, textUrls...)
-		availBeans := s.Join(beansAndUrls, ", ")
+		availBeans := strings.Join(beansAndUrls, ", ")
 		err := text(availBeans, true)
 		assertErrorToNilf("text attempt unsuccessful: %v", err)
 	}
@@ -159,8 +150,9 @@ func scraper(res *http.Response) (Beans, error) {
 	doc.Find("div.sold-out").Each(func(i int, s *goquery.Selection) {
 		name := s.Find("p.grid-link__title").First().Text()
 		if name == "" {
-			message := []byte("issue with scrape -- please check selectors")
-			email(message)
+			message := "issue with Bean Counter -- please check selectors"
+			err := text(message, false)
+			assertErrorToNilf("text attempt unsuccessful: %v", err)
 		}
 		todayBeans[name] = true
 	})
@@ -175,9 +167,7 @@ func text(beans string, available bool) error {
 	params.SetFrom(os.Getenv("TWILIO_PHONE_NUMBER"))
 	if available {
 		availBeans := beans
-		params.SetBody(fmt.Sprintf(`The following beans are now available: 
-		%s
-		`, availBeans))
+		params.SetBody(fmt.Sprintf("The following beans are now available: %s", availBeans))
 	} else {
 		params.SetBody(beans)
 	}
@@ -193,12 +183,13 @@ func text(beans string, available bool) error {
 func checkURL(available []string) []string {
 	base := "https://www.ranchogordo.com/products/"
 	textUrls := []string{}
+	// add goroutines
 	for _, v := range available {
 		body, err := quickRequest(base, v)
 		if err != nil {
 			log.Printf("unable to check URL for %q", v)
 		}
-		wrongURL := regexp.MustCompile("404-not-found").MatchString(body)
+		wrongURL := strings.Contains(body, "404-not-found")
 		if wrongURL {
 			textUrls = append(textUrls, "https://www.ranchogordo.com/")
 		} else {
@@ -209,6 +200,8 @@ func checkURL(available []string) []string {
 }
 
 func quickRequest(url, name string) (string, error) {
+	name = strings.Replace(name, " ", "-", -1)
+	name = strings.ToLower(name)
 	res, err := http.Get(url + name)
 	if err != nil {
 		return "", fmt.Errorf("checkURL failing: %v", err)
@@ -223,44 +216,21 @@ func quickRequest(url, name string) (string, error) {
 }
 
 func key() (string, string, error) {
+	var yesterday int
 	t := time.Now()
 	today := int(t.Weekday())
-	var yesterday int
+	
 	if today == 0 {
 		yesterday = 6
 	} else {
 		yesterday = int(t.Weekday() - 1)
 	}
-	yesterdayKey := s.Join([]string{"waitlistedBeans", strconv.Itoa(yesterday)}, "")
-	todayKey := s.Join([]string{"waitlistedBeans", strconv.Itoa(today)}, "")
+	yesterdayKey := strings.Join([]string{"waitlistedBeans", strconv.Itoa(yesterday)}, "")
+	todayKey := strings.Join([]string{"waitlistedBeans", strconv.Itoa(today)}, "")
 	if yesterdayKey == "" || todayKey == "" {
 		return yesterdayKey, todayKey, errors.New("problem with key creation")
 	}
 	return yesterdayKey, todayKey, nil
-}
-
-func email(message []byte) {
-	from := os.Getenv("FROM")
-	password := os.Getenv("PASSWORD")
-
-	to := []string{
-		os.Getenv("TO"),
-	}
-	smtpHost := os.Getenv("SMTP_HOST")
-	smtpPort := os.Getenv("SMTP_PORT")
-
-	body := message
-
-	auth := smtp.PlainAuth("", from, password, smtpHost)
-
-	addr := s.Join([]string{smtpHost, smtpPort}, ":")
-
-	emailErr := smtp.SendMail(addr, auth, from, to, body)
-	if emailErr != nil {
-		log.Println("email failed to send", emailErr)
-		return
-	}
-	log.Printf("Email successfully sent to %s", to[0])
 }
 
 func assertErrorToNilf(msg string, err error) {
