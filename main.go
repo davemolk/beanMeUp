@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -183,19 +184,24 @@ func text(beans string, available bool) error {
 func checkURL(available []string) []string {
 	base := "https://www.ranchogordo.com/products/"
 	textUrls := []string{}
-	// add goroutines
-	for _, v := range available {
-		body, err := quickRequest(base, v)
-		if err != nil {
-			log.Printf("unable to check URL for %q", v)
-		}
-		wrongURL := strings.Contains(body, "404-not-found")
-		if wrongURL {
-			textUrls = append(textUrls, "https://www.ranchogordo.com/")
-		} else {
-			textUrls = append(textUrls, base+v)
-		}
+	var wg sync.WaitGroup
+	for _, bean := range available {
+		wg.Add(1)
+		go func(b string) {
+			body, err := quickRequest(base, b)
+			if err != nil {
+				log.Printf("unable to check %q url", b)
+			}
+			wrongURL := strings.Contains(body, "404-not-found")
+			if wrongURL {
+				textUrls = append(textUrls, "https://www.ranchogordo.com/")
+			} else {
+				textUrls = append(textUrls, base+b)
+			}
+			wg.Done()
+		}(bean)
 	}
+	wg.Wait()
 	return textUrls
 }
 
@@ -219,7 +225,7 @@ func key() (string, string, error) {
 	var yesterday int
 	t := time.Now()
 	today := int(t.Weekday())
-	
+
 	if today == 0 {
 		yesterday = 6
 	} else {

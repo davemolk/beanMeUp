@@ -1,5 +1,4 @@
-# goRGWaitList
-
+# Bean Me Up
 create request
 scrape today's data
 pull yesterday's data from s3

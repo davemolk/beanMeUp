@@ -1,4 +1,4 @@
-module github.com/davemolk/beanCounter
+module github.com/davemolk/beanMeUp
 
 go 1.17
 
