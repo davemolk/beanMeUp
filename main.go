@@ -24,6 +24,7 @@ import (
 	openapi "github.com/twilio/twilio-go/rest/api/v2010"
 )
 
+// Beans is used to store the names of the waitlisted beans.
 type Beans map[string]bool
 
 type Weekday int
@@ -122,6 +123,7 @@ func main() {
 	}
 }
 
+// mainRequest makes a GET request to the Rancho Gordo waitlist page, returning the response and any errors. 
 func mainRequest(url string, client *http.Client) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -140,6 +142,7 @@ func mainRequest(url string, client *http.Client) (*http.Response, error) {
 	return res, nil
 }
 
+// scraper parses the Rancho Gordo waitlist page, recording the names of all waitlisted beans and any errors.
 func scraper(res *http.Response) (Beans, error) {
 	doc, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
@@ -161,6 +164,7 @@ func scraper(res *http.Response) (Beans, error) {
 	return todayBeans, nil
 }
 
+// text uses the Twilio API to send an SMS with a passed-in message, returning any errors. 
 func text(beans string, available bool) error {
 	client := twilio.NewRestClient()
 	params := &openapi.CreateMessageParams{}
@@ -181,6 +185,7 @@ func text(beans string, available bool) error {
 	return nil
 }
 
+// checkURL attempts to create a URL for each newly available bean off the waitlist, defaulting to the main Rancho Gordo URL. 
 func checkURL(available []string) []string {
 	base := "https://www.ranchogordo.com/products/"
 	textUrls := []string{}
@@ -205,6 +210,7 @@ func checkURL(available []string) []string {
 	return textUrls
 }
 
+// quickRequest returns the HTML string of a given page and any errors.
 func quickRequest(url, name string) (string, error) {
 	name = strings.Replace(name, " ", "-", -1)
 	name = strings.ToLower(name)
@@ -221,6 +227,8 @@ func quickRequest(url, name string) (string, error) {
 	return string(body), nil
 }
 
+// key uses the current day to create a new key for the S3 data storage. Waitlist data is kept in S3
+// for a week before being overwritten.
 func key() (string, string, error) {
 	var yesterday int
 	t := time.Now()
@@ -239,6 +247,7 @@ func key() (string, string, error) {
 	return yesterdayKey, todayKey, nil
 }
 
+// assertErrorToNilf is a simple helper function for error handling.
 func assertErrorToNilf(msg string, err error) {
 	if err != nil {
 		log.Fatalf(msg, err)
