@@ -43,18 +43,18 @@ func main() {
 	err := godotenv.Load(".env")
 	assertErrorToNilf("unable to load env: %v", err)
 
-	beanUrl := "https://www.ranchogordo.com/collections/out-of-stock-beans"
+	beanURL := "https://www.ranchogordo.com/collections/out-of-stock-beans"
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
 
-	res, err := mainRequest(beanUrl, client)
+	resp, err := mainRequest(beanURL, client)
 	assertErrorToNilf("unable to reach website: %v", err)
 
-	defer res.Body.Close()
+	defer resp.Body.Close()
 
-	todayBeans, err := scraper(res)
+	todayBeans, err := scraper(resp)
 	assertErrorToNilf("scrape unsuccessful: %v", err)
 
 	yesterdayKey, todayKey, err := key()
@@ -87,7 +87,7 @@ func main() {
 	log.Println("yesterday's beans:", yesterdayBeans)
 
 	// compare yesterday's waitlist with today's
-	available := []string{}
+	var available []string
 
 	for name := range yesterdayBeans {
 		if _, ok := todayBeans[name]; !ok {
@@ -123,7 +123,7 @@ func main() {
 	}
 }
 
-// mainRequest makes a GET request to the Rancho Gordo waitlist page, returning the response and any errors. 
+// mainRequest makes a GET request to the Rancho Gordo waitlist page, returning the response and any errors.
 func mainRequest(url string, client *http.Client) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -134,17 +134,17 @@ func mainRequest(url string, client *http.Client) (*http.Response, error) {
 
 	req.Header.Set("User-Agent", uAgent)
 
-	res, err := client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %v", err)
 	}
 
-	return res, nil
+	return resp, nil
 }
 
 // scraper parses the Rancho Gordo waitlist page, recording the names of all waitlisted beans and any errors.
-func scraper(res *http.Response) (Beans, error) {
-	doc, err := goquery.NewDocumentFromReader(res.Body)
+func scraper(resp *http.Response) (Beans, error) {
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing website: %v", err)
 	}
@@ -154,8 +154,8 @@ func scraper(res *http.Response) (Beans, error) {
 	doc.Find("div.sold-out").Each(func(i int, s *goquery.Selection) {
 		name := s.Find("p.grid-link__title").First().Text()
 		if name == "" {
-			message := "issue with Bean Counter -- please check selectors"
-			err := text(message, false)
+			msg := "issue with Bean Counter -- please check selectors"
+			err := text(msg, false)
 			assertErrorToNilf("text attempt unsuccessful: %v", err)
 		}
 		todayBeans[name] = true
@@ -164,7 +164,7 @@ func scraper(res *http.Response) (Beans, error) {
 	return todayBeans, nil
 }
 
-// text uses the Twilio API to send an SMS with a passed-in message, returning any errors. 
+// text uses the Twilio API to send an SMS with a passed-in message, returning any errors.
 func text(beans string, available bool) error {
 	client := twilio.NewRestClient()
 	params := &openapi.CreateMessageParams{}
@@ -185,10 +185,10 @@ func text(beans string, available bool) error {
 	return nil
 }
 
-// checkURL attempts to create a URL for each newly available bean off the waitlist, defaulting to the main Rancho Gordo URL. 
+// checkURL attempts to create a URL for each newly available bean off the waitlist, defaulting to the main Rancho Gordo URL.
 func checkURL(available []string) []string {
 	base := "https://www.ranchogordo.com/products/"
-	textUrls := []string{}
+	var textUrls []string
 	var wg sync.WaitGroup
 	for _, bean := range available {
 		bean = strings.TrimSpace(bean)
@@ -216,13 +216,13 @@ func checkURL(available []string) []string {
 func quickRequest(url, name string) (string, error) {
 	name = strings.Replace(name, " ", "-", -1)
 	name = strings.ToLower(name)
-	res, err := http.Get(url + name)
+	resp, err := http.Get(url + name)
 	if err != nil {
 		return "", fmt.Errorf("checkURL failing: %v", err)
 	}
 
-	defer res.Body.Close()
-	body, err := io.ReadAll(res.Body)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("error with checkURL ReadAll: %v", err)
 	}
