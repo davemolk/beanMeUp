@@ -191,6 +191,8 @@ func checkURL(available []string) []string {
 	textUrls := []string{}
 	var wg sync.WaitGroup
 	for _, bean := range available {
+		bean = strings.TrimSpace(bean)
+		bean = strings.Replace(bean, " ", "-", -1)
 		wg.Add(1)
 		go func(b string) {
 			body, err := quickRequest(base, b)
